@@ -17,6 +17,7 @@ class Config:
     storage_path: Path
     embedding_model: str
     sync_interval_minutes: int
+    obsidian_vault_path: str = ""
 
     @property
     def chroma_path(self) -> Path:
@@ -50,6 +51,7 @@ def load_config() -> Config:
         storage_path=storage_path,
         embedding_model=raw["embedding_model"],
         sync_interval_minutes=raw["sync_interval_minutes"],
+        obsidian_vault_path=raw.get("obsidian_vault_path", ""),
     )
 
 # Single shared instance — import this everywhere

@@ -1,8 +1,5 @@
 import mcp.types as types
-from src.pipeline.ingest import IngestPipeline
-
-# Instantiated once at module load so the embedding model loads only once
-pipeline = IngestPipeline()
+from src.pipeline.ingest import pipeline
 
 INGEST_TOOL = types.Tool(
     name="ingest_content",

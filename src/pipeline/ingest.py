@@ -25,7 +25,7 @@ class IngestPipeline:
         file_hash: str = None,
     ) -> dict:
         # 1. Skip if file unchanged
-        if file_hash and storage.fts.get_by_hash(file_hash):
+        if file_hash and storage.fts.get_by_hash(file_hash, note_id):
             return {"status": "skipped", "reason": "unchanged"}
 
         # 2. Detect URLs
@@ -106,8 +106,11 @@ class IngestPipeline:
         }
 
 
+# Shared singleton — import this from both tools and connectors
+pipeline = IngestPipeline()
+
 if __name__ == "__main__":
-    pipeline = IngestPipeline()
+    _pipeline = IngestPipeline()
 
     test_text = (
         "Just watched this classic: https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
@@ -115,7 +118,7 @@ if __name__ == "__main__":
     )
 
     print("Ingesting test note...\n")
-    result = pipeline.ingest(
+    result = _pipeline.ingest(
         text=test_text,
         source="test",
         note_id="test-note-001",

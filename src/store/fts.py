@@ -85,9 +85,15 @@ class FTSStore:
                 """, (query, limit)).fetchall()
             return [dict(r) for r in rows]
 
-    def get_by_hash(self, file_hash: str) -> dict | None:
+    def get_by_hash(self, file_hash: str, note_id: str = None) -> dict | None:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM notes WHERE file_hash = ?", (file_hash,)
-            ).fetchone()
+            if note_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM notes WHERE file_hash = ? AND id = ?",
+                    (file_hash, note_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM notes WHERE file_hash = ?", (file_hash,)
+                ).fetchone()
             return dict(row) if row else None

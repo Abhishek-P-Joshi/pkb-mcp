@@ -4,6 +4,7 @@ from mcp.server.lowlevel.server import NotificationOptions
 import mcp.server.stdio
 import mcp.types as types
 from src.config import config
+from src.connectors.watcher import FolderWatcher
 from rich.console import Console
 
 console = Console()
@@ -15,6 +16,7 @@ server = Server("pkb-mcp")
 
 from src.tools.health import handle_health_check
 from src.tools.ingest import handle_ingest_content, INGEST_TOOL
+from src.tools.sync import handle_sync, SYNC_TOOL
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
@@ -25,6 +27,7 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={"type": "object", "properties": {}, "required": []},
         ),
         INGEST_TOOL,
+        SYNC_TOOL,
     ]
 
 @server.call_tool()
@@ -33,7 +36,17 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await handle_health_check()
     elif name == "ingest_content":
         return await handle_ingest_content(arguments)
+    elif name == "sync_knowledge_base":
+        return await handle_sync(arguments)
     raise ValueError(f"Unknown tool: {name}")
+
+
+def start_watcher() -> FolderWatcher:
+    inbox_path = config.storage_path / "watched" / "inbox"
+    inbox_path.mkdir(parents=True, exist_ok=True)
+    watcher = FolderWatcher(str(inbox_path))
+    watcher.start()
+    return watcher
 
 
 async def run():
@@ -41,6 +54,9 @@ async def run():
     console.print(f"  env:       {config.env}")
     console.print(f"  transport: {config.transport}")
     console.print(f"  storage:   {config.storage_path}")
+
+    _watcher = start_watcher()
+    console.print(f"  watcher:   {config.storage_path / 'watched' / 'inbox'}")
 
     if config.transport == "stdio":
         # Local mode — Claude desktop spawns this process directly
