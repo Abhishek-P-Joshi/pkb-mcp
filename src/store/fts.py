@@ -67,7 +67,15 @@ class FTSStore:
                     updated_at=CURRENT_TIMESTAMP
             """, note)
 
+    def _sanitize_fts_query(self, query: str) -> str:
+        """Strip characters that have special meaning in FTS5 MATCH syntax."""
+        import re
+        sanitized = re.sub(r'[^\w\s]', ' ', query)
+        sanitized = ' '.join(sanitized.split())
+        return sanitized if sanitized else 'the'
+
     def search(self, query: str, content_type: str = None, limit: int = 20) -> list[dict]:
+        query = self._sanitize_fts_query(query)
         with self._connect() as conn:
             if content_type:
                 rows = conn.execute("""
@@ -84,6 +92,46 @@ class FTSStore:
                     ORDER BY rank LIMIT ?
                 """, (query, limit)).fetchall()
             return [dict(r) for r in rows]
+
+    def list_notes(
+        self,
+        content_type: str = None,
+        source: str = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        conditions = ["1=1"]
+        params = []
+        if content_type:
+            conditions.append("content_type = ?")
+            params.append(content_type)
+        if source:
+            conditions.append("source = ?")
+            params.append(source)
+        params.extend([limit, offset])
+        where = " AND ".join(conditions)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT id, title, content_type, source, url, tags, created_at "
+                f"FROM notes WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_notes(self, content_type: str = None, source: str = None) -> int:
+        conditions = ["1=1"]
+        params = []
+        if content_type:
+            conditions.append("content_type = ?")
+            params.append(content_type)
+        if source:
+            conditions.append("source = ?")
+            params.append(source)
+        where = " AND ".join(conditions)
+        with self._connect() as conn:
+            return conn.execute(
+                f"SELECT COUNT(*) FROM notes WHERE {where}", params
+            ).fetchone()[0]
 
     def get_by_hash(self, file_hash: str, note_id: str = None) -> dict | None:
         with self._connect() as conn:

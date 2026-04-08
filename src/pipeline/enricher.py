@@ -1,4 +1,5 @@
 import re
+import sys
 import httpx
 import yt_dlp
 
@@ -54,7 +55,7 @@ class URLEnricher:
             return {"title": title, "description": description, "url": url, "source": "web"}
 
         except Exception as e:
-            print(f"[enricher] Failed to fetch {url}: {e}")
+            print(f"[enricher] Failed to fetch {url}: {e}", file=sys.stderr)
             return {"title": "", "description": "", "url": url, "source": "web"}
 
     def enrich_youtube(self, url: str) -> dict:
@@ -65,9 +66,9 @@ class URLEnricher:
                 info = ydl.extract_info(url, download=False)
 
             title = info.get("title", "")
-            description = (info.get("description") or "")[:300]
+            description = (info.get("description") or "")[:500]
             channel = info.get("channel") or info.get("uploader", "")
-            tags = ", ".join((info.get("tags") or [])[:5])
+            tags = ", ".join((info.get("tags") or [])[:10])
 
             return {
                 "title": title,
@@ -79,7 +80,7 @@ class URLEnricher:
             }
 
         except Exception as e:
-            print(f"[enricher] Failed to fetch YouTube metadata for {url}: {e}")
+            print(f"[enricher] Failed to fetch YouTube metadata for {url}: {e}", file=sys.stderr)
             return {"title": "", "description": "", "channel": "", "tags": "", "url": url, "source": "youtube"}
 
 

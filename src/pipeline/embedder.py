@@ -1,3 +1,4 @@
+import sys
 from sentence_transformers import SentenceTransformer
 from src.config import config
 
@@ -9,7 +10,7 @@ class Embedder:
     """
 
     def __init__(self):
-        print(f"Loading embedding model: {config.embedding_model}...")
+        print(f"Loading embedding model: {config.embedding_model}...", file=sys.stderr)
         self._model = SentenceTransformer(config.embedding_model)
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:

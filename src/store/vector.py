@@ -17,6 +17,16 @@ class VectorStore:
         # Loaded once at startup — ~90MB, runs fully locally
         self._model = SentenceTransformer(config.embedding_model)
 
+    def _get_collection(self):
+        try:
+            return self.collection
+        except Exception:
+            self.collection = self.client.get_or_create_collection(
+                name="pkb_notes",
+                metadata={"hnsw:space": "cosine"},
+            )
+            return self.collection
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self._model.encode(texts, show_progress_bar=False).tolist()
 
@@ -30,7 +40,7 @@ class VectorStore:
         metadatas = [c["metadata"] for c in chunks]
         embeddings = self.embed(texts)
 
-        self.collection.upsert(
+        self._get_collection().upsert(
             ids=ids,
             embeddings=embeddings,
             documents=texts,
@@ -41,7 +51,7 @@ class VectorStore:
         where = {"content_type": content_type} if content_type else None
         query_embedding = self.embed([query])[0]
 
-        results = self.collection.query(
+        results = self._get_collection().query(
             query_embeddings=[query_embedding],
             n_results=n_results,
             where=where,

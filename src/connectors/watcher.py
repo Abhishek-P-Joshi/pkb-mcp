@@ -39,7 +39,7 @@ class PKBEventHandler(FileSystemEventHandler):
         try:
             result = self._parser.parse(str(path))
             if result.get("error"):
-                print(f"[watcher] Parse error for {path.name}: {result['error']}")
+                print(f"[watcher] Parse error for {path.name}: {result['error']}", file=sys.stderr)
                 return
 
             file_hash = hash_file(str(path))
@@ -53,14 +53,15 @@ class PKBEventHandler(FileSystemEventHandler):
             )
 
             if ingest_result["status"] == "skipped":
-                print(f"[watcher] Skipped (unchanged): {path.name}")
+                print(f"[watcher] Skipped (unchanged): {path.name}", file=sys.stderr)
             else:
                 print(
                     f"Ingested: {path.name} "
-                    f"({ingest_result['content_type']}, {ingest_result['chunks']} chunks)"
+                    f"({ingest_result['content_type']}, {ingest_result['chunks']} chunks)",
+                    file=sys.stderr,
                 )
         except Exception as e:
-            print(f"[watcher] Error processing {path.name}: {e}")
+            print(f"[watcher] Error processing {path.name}: {e}", file=sys.stderr)
         finally:
             self._processing.discard(str(path))
 
@@ -76,7 +77,7 @@ class FolderWatcher:
     def start(self):
         self._observer.schedule(self._handler, str(self.watch_path), recursive=True)
         self._observer.start()
-        print(f"Watching {self.watch_path} for changes...")
+        print(f"Watching {self.watch_path} for changes...", file=sys.stderr)
 
     def stop(self):
         self._observer.stop()
@@ -93,4 +94,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     watcher.stop()
-    print("Watcher stopped.")
+    print("Watcher stopped.", file=sys.stderr)

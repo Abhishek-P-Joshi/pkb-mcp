@@ -34,25 +34,33 @@ class IngestPipeline:
         # 3. Enrich first URL if present
         title = ""
         description = ""
+        channel = ""
+        tags = ""
         first_url = urls[0] if urls else ""
         if first_url:
             meta = self.enricher.enrich(first_url)
             title = meta.get("title", "")
             description = meta.get("description", "")
+            channel = meta.get("channel", "")
+            tags = meta.get("tags", "")
 
         # 4. Classify content type
         content_type = classify_content(text, urls)
 
-        # 5. Build combined text for embedding
-        parts = [text]
+        # 5. Build enriched text for embedding (and FTS storage)
+        enriched_suffix = ""
         if title:
-            parts.append(title)
+            enriched_suffix += f"\n\nTitle: {title}"
+        if channel:
+            enriched_suffix += f"\nChannel: {channel}"
         if description:
-            parts.append(description)
-        combined = "\n".join(parts)
+            enriched_suffix += f"\nDescription: {description}"
+        if tags:
+            enriched_suffix += f"\nTags: {tags}"
+        text_to_embed = text + enriched_suffix
 
         # 6. Chunk
-        chunks = self.chunker.chunk(combined)
+        chunks = self.chunker.chunk(text_to_embed)
 
         # 7. Batch embed all chunks
         chunk_texts = [c["text"] for c in chunks]
@@ -70,7 +78,7 @@ class IngestPipeline:
             "url": first_url,
             "tags": "",
             "file_hash": file_hash or "",
-            "raw_text": text,
+            "raw_text": text_to_embed,
         })
 
         # 9. Upsert chunks into vector store
@@ -89,7 +97,7 @@ class IngestPipeline:
             for i in range(len(chunks))
         ]
         # Attach pre-computed embeddings directly to avoid re-embedding
-        storage.vector.collection.upsert(
+        storage.vector._get_collection().upsert(
             ids=[c["id"] for c in vector_chunks],
             embeddings=embeddings,
             documents=chunk_texts,

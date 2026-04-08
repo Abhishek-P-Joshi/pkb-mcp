@@ -7,7 +7,7 @@ from src.config import config
 from src.connectors.watcher import FolderWatcher
 from rich.console import Console
 
-console = Console()
+console = Console(stderr=True)
 server = Server("pkb-mcp")
 
 # ── Tools are registered here as we build them ──────────────────────────────
@@ -17,6 +17,9 @@ server = Server("pkb-mcp")
 from src.tools.health import handle_health_check
 from src.tools.ingest import handle_ingest_content, INGEST_TOOL
 from src.tools.sync import handle_sync, SYNC_TOOL
+from src.tools.search import handle_search, SEARCH_TOOL
+from src.tools.list_items import handle_list, LIST_TOOL
+from src.tools.answer import handle_answer, ANSWER_TOOL
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
@@ -28,6 +31,9 @@ async def list_tools() -> list[types.Tool]:
         ),
         INGEST_TOOL,
         SYNC_TOOL,
+        SEARCH_TOOL,
+        LIST_TOOL,
+        ANSWER_TOOL,
     ]
 
 @server.call_tool()
@@ -38,6 +44,12 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await handle_ingest_content(arguments)
     elif name == "sync_knowledge_base":
         return await handle_sync(arguments)
+    elif name == "search_knowledge":
+        return await handle_search(arguments)
+    elif name == "list_items":
+        return await handle_list(arguments)
+    elif name == "answer_question":
+        return await handle_answer(arguments)
     raise ValueError(f"Unknown tool: {name}")
 
 
