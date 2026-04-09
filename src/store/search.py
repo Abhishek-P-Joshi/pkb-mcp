@@ -53,15 +53,15 @@ def hybrid_search(
     query: str,
     content_type: str = None,
     source: str = None,
-    limit: int = 10,
+    limit: int = 20,
     min_score: float = 0.015,
 ) -> list[dict]:
     """
     Hybrid search combining FTS and vector results via RRF.
     Optionally filter by content_type, source, and minimum RRF score.
     """
-    fts_results = storage.fts.search(query, content_type=content_type, limit=limit * 2)
-    vector_results = storage.vector.search(query, content_type=content_type, n_results=limit * 2)
+    fts_results = storage.fts.search(query, content_type=content_type, limit=limit * 3)
+    vector_results = storage.vector.search(query, content_type=content_type, n_results=limit * 3)
 
     if source:
         fts_results = [r for r in fts_results if r.get("source") == source]

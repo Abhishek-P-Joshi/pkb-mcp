@@ -97,7 +97,7 @@ class FTSStore:
         self,
         content_type: str = None,
         source: str = None,
-        limit: int = 50,
+        limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
         conditions = ["1=1"]

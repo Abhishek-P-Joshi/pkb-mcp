@@ -22,8 +22,9 @@ LIST_TOOL = types.Tool(
             },
             "limit": {
                 "type": "integer",
-                "description": "Number of items to return",
-                "default": 20,
+                "description": "Number of items to return. Use offset for pagination when there are many items.",
+                "default": 50,
+                "maximum": 200,
             },
             "offset": {
                 "type": "integer",
@@ -39,7 +40,7 @@ LIST_TOOL = types.Tool(
 async def handle_list(arguments: dict) -> list[types.TextContent]:
     content_type = arguments.get("content_type")
     source = arguments.get("source")
-    limit = int(arguments.get("limit", 20))
+    limit = min(int(arguments.get("limit", 50)), 200)
     offset = int(arguments.get("offset", 0))
 
     results = storage.fts.list_notes(content_type, source, limit, offset)

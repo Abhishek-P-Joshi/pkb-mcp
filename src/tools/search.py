@@ -27,9 +27,9 @@ SEARCH_TOOL = types.Tool(
             },
             "limit": {
                 "type": "integer",
-                "description": "Number of results to return (max 25)",
-                "default": 10,
-                "maximum": 25,
+                "description": "Number of results to return (default 20, max 50)",
+                "default": 20,
+                "maximum": 50,
             },
             "min_score": {
                 "type": "number",
@@ -54,7 +54,7 @@ async def handle_search(arguments: dict) -> list[types.TextContent]:
     query = arguments["query"]
     content_type = arguments.get("content_type")
     source = arguments.get("source")
-    limit = min(int(arguments.get("limit", 10)), 25)
+    limit = min(int(arguments.get("limit", 20)), 50)
     min_score = float(arguments.get("min_score", 0.02))
     fts_only = bool(arguments.get("fts_only", False))
 
