@@ -56,16 +56,69 @@ class FTSStore:
                 END;
             """)
 
+            new_columns = [
+                "ALTER TABLE notes ADD COLUMN uploaded_at TEXT",
+                "ALTER TABLE notes ADD COLUMN channel TEXT",
+                "ALTER TABLE notes ADD COLUMN channel_id TEXT",
+                "ALTER TABLE notes ADD COLUMN duration_seconds INTEGER",
+                "ALTER TABLE notes ADD COLUMN duration_string TEXT",
+                "ALTER TABLE notes ADD COLUMN view_count INTEGER",
+                "ALTER TABLE notes ADD COLUMN like_count INTEGER",
+                "ALTER TABLE notes ADD COLUMN categories TEXT",
+                "ALTER TABLE notes ADD COLUMN language TEXT",
+                "ALTER TABLE notes ADD COLUMN thumbnail_url TEXT",
+            ]
+            for sql in new_columns:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+            conn.commit()
+
     def upsert(self, note: dict):
         with self._connect() as conn:
             conn.execute("""
-                INSERT INTO notes (id, source, content_type, title, url, tags, file_hash, raw_text, updated_at)
-                VALUES (:id, :source, :content_type, :title, :url, :tags, :file_hash, :raw_text, CURRENT_TIMESTAMP)
+                INSERT INTO notes (
+                    id, source, content_type, title, url, tags, file_hash, raw_text,
+                    uploaded_at, channel, channel_id, duration_seconds, duration_string,
+                    view_count, like_count, categories, language, thumbnail_url,
+                    updated_at
+                )
+                VALUES (
+                    :id, :source, :content_type, :title, :url, :tags, :file_hash, :raw_text,
+                    :uploaded_at, :channel, :channel_id, :duration_seconds, :duration_string,
+                    :view_count, :like_count, :categories, :language, :thumbnail_url,
+                    CURRENT_TIMESTAMP
+                )
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title, raw_text=excluded.raw_text,
                     tags=excluded.tags, file_hash=excluded.file_hash,
+                    uploaded_at=excluded.uploaded_at, channel=excluded.channel,
+                    channel_id=excluded.channel_id, duration_seconds=excluded.duration_seconds,
+                    duration_string=excluded.duration_string, view_count=excluded.view_count,
+                    like_count=excluded.like_count, categories=excluded.categories,
+                    language=excluded.language, thumbnail_url=excluded.thumbnail_url,
                     updated_at=CURRENT_TIMESTAMP
-            """, note)
+            """, {
+                "id": note.get("id"),
+                "source": note.get("source"),
+                "content_type": note.get("content_type"),
+                "title": note.get("title"),
+                "url": note.get("url"),
+                "tags": note.get("tags"),
+                "file_hash": note.get("file_hash"),
+                "raw_text": note.get("raw_text"),
+                "uploaded_at": note.get("uploaded_at"),
+                "channel": note.get("channel"),
+                "channel_id": note.get("channel_id"),
+                "duration_seconds": note.get("duration_seconds"),
+                "duration_string": note.get("duration_string"),
+                "view_count": note.get("view_count"),
+                "like_count": note.get("like_count"),
+                "categories": note.get("categories"),
+                "language": note.get("language"),
+                "thumbnail_url": note.get("thumbnail_url"),
+            })
 
     def _sanitize_fts_query(self, query: str) -> str:
         """Strip characters that have special meaning in FTS5 MATCH syntax."""
@@ -118,6 +171,139 @@ class FTSStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def filter_by_date(
+        self,
+        content_type: str = None,
+        source: str = None,
+        channel: str = None,
+        language: str = None,
+        categories: str = None,
+        uploaded_after: str = None,
+        uploaded_before: str = None,
+        ingested_after: str = None,
+        ingested_before: str = None,
+        min_duration_seconds: int = None,
+        max_duration_seconds: int = None,
+        order_by: str = "ingested",
+        order_dir: str = "DESC",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        conditions = ["1=1"]
+        params = []
+        if content_type:
+            conditions.append("content_type = ?")
+            params.append(content_type)
+        if source:
+            conditions.append("source = ?")
+            params.append(source)
+        if channel:
+            conditions.append("channel LIKE ?")
+            params.append(f"%{channel}%")
+        if language:
+            conditions.append("language = ?")
+            params.append(language)
+        if categories:
+            conditions.append("categories LIKE ?")
+            params.append(f"%{categories}%")
+        if uploaded_after:
+            conditions.append("uploaded_at >= ?")
+            params.append(uploaded_after)
+        if uploaded_before:
+            conditions.append("uploaded_at <= ?")
+            params.append(uploaded_before)
+        if ingested_after:
+            conditions.append("created_at >= ?")
+            params.append(ingested_after)
+        if ingested_before:
+            conditions.append("created_at <= ?")
+            params.append(ingested_before)
+        if min_duration_seconds is not None:
+            conditions.append("duration_seconds >= ?")
+            params.append(min_duration_seconds)
+        if max_duration_seconds is not None:
+            conditions.append("duration_seconds <= ?")
+            params.append(max_duration_seconds)
+
+        order_dir = "DESC" if order_dir.upper() == "DESC" else "ASC"
+        order_expr = (
+            "CASE WHEN ? = 'uploaded' THEN uploaded_at "
+            "     WHEN ? = 'views'    THEN CAST(view_count AS TEXT) "
+            "     ELSE created_at END"
+        )
+
+        where = " AND ".join(conditions)
+        params_with_order = params + [order_by, order_by, limit, offset]
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT id, title, content_type, source, url, tags, "
+                f"       channel, channel_id, uploaded_at, created_at, "
+                f"       duration_string, view_count, like_count, "
+                f"       categories, language, thumbnail_url "
+                f"FROM notes WHERE {where} "
+                f"ORDER BY {order_expr} {order_dir} "
+                f"LIMIT ? OFFSET ?",
+                params_with_order,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_filtered(
+        self,
+        content_type: str = None,
+        source: str = None,
+        channel: str = None,
+        language: str = None,
+        categories: str = None,
+        uploaded_after: str = None,
+        uploaded_before: str = None,
+        ingested_after: str = None,
+        ingested_before: str = None,
+        min_duration_seconds: int = None,
+        max_duration_seconds: int = None,
+    ) -> int:
+        conditions = ["1=1"]
+        params = []
+        if content_type:
+            conditions.append("content_type = ?")
+            params.append(content_type)
+        if source:
+            conditions.append("source = ?")
+            params.append(source)
+        if channel:
+            conditions.append("channel LIKE ?")
+            params.append(f"%{channel}%")
+        if language:
+            conditions.append("language = ?")
+            params.append(language)
+        if categories:
+            conditions.append("categories LIKE ?")
+            params.append(f"%{categories}%")
+        if uploaded_after:
+            conditions.append("uploaded_at >= ?")
+            params.append(uploaded_after)
+        if uploaded_before:
+            conditions.append("uploaded_at <= ?")
+            params.append(uploaded_before)
+        if ingested_after:
+            conditions.append("created_at >= ?")
+            params.append(ingested_after)
+        if ingested_before:
+            conditions.append("created_at <= ?")
+            params.append(ingested_before)
+        if min_duration_seconds is not None:
+            conditions.append("duration_seconds >= ?")
+            params.append(min_duration_seconds)
+        if max_duration_seconds is not None:
+            conditions.append("duration_seconds <= ?")
+            params.append(max_duration_seconds)
+
+        where = " AND ".join(conditions)
+        with self._connect() as conn:
+            return conn.execute(
+                f"SELECT COUNT(*) FROM notes WHERE {where}", params
+            ).fetchone()[0]
+
     def count_notes(self, content_type: str = None, source: str = None) -> int:
         conditions = ["1=1"]
         params = []
@@ -132,6 +318,13 @@ class FTSStore:
             return conn.execute(
                 f"SELECT COUNT(*) FROM notes WHERE {where}", params
             ).fetchone()[0]
+
+    def get_by_id(self, note_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM notes WHERE id = ?", (note_id,)
+            ).fetchone()
+            return dict(row) if row else None
 
     def get_by_hash(self, file_hash: str, note_id: str = None) -> dict | None:
         with self._connect() as conn:

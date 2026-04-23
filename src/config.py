@@ -18,6 +18,7 @@ class Config:
     embedding_model: str
     sync_interval_minutes: int
     obsidian_vault_path: str = ""
+    youtube_sync_enabled: bool = False
 
     @property
     def chroma_path(self) -> Path:
@@ -52,6 +53,7 @@ def load_config() -> Config:
         embedding_model=raw["embedding_model"],
         sync_interval_minutes=raw["sync_interval_minutes"],
         obsidian_vault_path=raw.get("obsidian_vault_path", ""),
+        youtube_sync_enabled=raw.get("youtube_sync_enabled", False),
     )
 
 # Single shared instance — import this everywhere

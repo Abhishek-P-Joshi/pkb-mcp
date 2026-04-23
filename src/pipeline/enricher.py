@@ -66,22 +66,65 @@ class URLEnricher:
                 info = ydl.extract_info(url, download=False)
 
             title = info.get("title", "")
-            description = (info.get("description") or "")[:500]
             channel = info.get("channel") or info.get("uploader", "")
+            channel_id = info.get("channel_id") or info.get("uploader_id", "")
+            description = str(info.get("description") or "")[:300]
             tags = ", ".join((info.get("tags") or [])[:10])
+            view_count = info.get("view_count")
+            like_count = info.get("like_count")
+            categories = ", ".join(info.get("categories") or [])
+            thumbnail_url = info.get("thumbnail", "")
+
+            # Language — prefer explicit field, fall back to first subtitle track
+            language = info.get("language") or ""
+            if not language:
+                subtitles = info.get("subtitles") or {}
+                keys = list(subtitles.keys())
+                language = keys[0] if keys else ""
+
+            # Duration
+            duration_seconds = info.get("duration")
+            if duration_seconds:
+                h = duration_seconds // 3600
+                m = (duration_seconds % 3600) // 60
+                s = duration_seconds % 60
+                duration_string = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+            else:
+                duration_string = ""
+
+            # Upload date — yt-dlp returns "YYYYMMDD"
+            raw_date = info.get("upload_date", "")
+            uploaded_at = (
+                f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+                if len(raw_date) == 8 else ""
+            )
 
             return {
                 "title": title,
-                "description": description,
                 "channel": channel,
+                "channel_id": channel_id,
+                "description": description,
                 "tags": tags,
+                "view_count": view_count,
+                "like_count": like_count,
+                "categories": categories,
+                "language": language,
+                "thumbnail_url": thumbnail_url,
+                "duration_seconds": duration_seconds,
+                "duration_string": duration_string,
+                "uploaded_at": uploaded_at,
                 "url": url,
                 "source": "youtube",
             }
 
         except Exception as e:
             print(f"[enricher] Failed to fetch YouTube metadata for {url}: {e}", file=sys.stderr)
-            return {"title": "", "description": "", "channel": "", "tags": "", "url": url, "source": "youtube"}
+            return {
+                "title": "", "channel": "", "channel_id": "", "description": "",
+                "tags": "", "view_count": None, "like_count": None, "categories": "",
+                "language": "", "thumbnail_url": "", "duration_seconds": None,
+                "duration_string": "", "uploaded_at": "", "url": url, "source": "youtube",
+            }
 
 
 if __name__ == "__main__":

@@ -9,16 +9,56 @@ SYNC_TOOL = types.Tool(
     name="sync_knowledge_base",
     description=(
         "Manually trigger a sync of all connected sources (inbox folder, "
-        "Obsidian vault if configured). Skips files that haven't changed."
+        "Obsidian vault if configured, YouTube playlist). Skips files that haven't changed."
     ),
     inputSchema={
         "type": "object",
         "properties": {
             "source": {
                 "type": "string",
-                "enum": ["all", "inbox", "obsidian"],
+                "enum": ["all", "inbox", "obsidian", "youtube"],
                 "description": "Which source to sync. Defaults to 'all'.",
-            }
+            },
+            "playlist_id": {
+                "type": "string",
+                "description": (
+                    "YouTube playlist ID. 'WL' = Watch Later (default), "
+                    "'LL' = Liked Videos, or any playlist ID from the URL."
+                ),
+            },
+        },
+        "required": [],
+    },
+)
+
+YOUTUBE_SYNC_TOOL = types.Tool(
+    name="sync_youtube_playlist",
+    description=(
+        "Sync a YouTube playlist into the knowledge base. "
+        "Fetches full metadata (title, channel, duration, views, upload date) "
+        "for each video. Skips already-ingested videos. "
+        "Defaults to Watch Later (WL). Use playlist_id='LL' for Liked Videos "
+        "or paste any YouTube playlist ID."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "playlist_id": {
+                "type": "string",
+                "description": "YouTube playlist ID. Defaults to 'WL' (Watch Later).",
+            },
+            "fetch_full_metadata": {
+                "type": "boolean",
+                "description": (
+                    "Fetch full metadata per video (slower but richer). "
+                    "Set false for a quick title-only import."
+                ),
+                "default": True,
+            },
+            "playlist_name": {
+                "type": "string",
+                "description": "Friendly name for the source e.g. 'saved' or 'watchlater_backup'. Used to identify videos from this playlist in browse and search.",
+            },
         },
         "required": [],
     },
@@ -30,6 +70,10 @@ _supported = {".md", ".txt", ".docx"}
 
 async def handle_sync(arguments: dict) -> list[types.TextContent]:
     source = arguments.get("source", "all")
+
+    # ── YouTube ──────────────────────────────────────────────────────────────
+    if source == "youtube":
+        return await handle_youtube_sync(arguments)
 
     inbox_synced = inbox_skipped = 0
     obsidian_synced = obsidian_skipped = obsidian_errors = 0
@@ -84,3 +128,28 @@ async def handle_sync(arguments: dict) -> list[types.TextContent]:
         lines.append(f"  obsidian: {obsidian_status}")
 
     return [types.TextContent(type="text", text="\n".join(lines))]
+
+
+async def handle_youtube_sync(arguments: dict) -> list[types.TextContent]:
+    playlist_id = arguments.get("playlist_id", "WL")
+    fetch_full_metadata = bool(arguments.get("fetch_full_metadata", True))
+    playlist_name = arguments.get("playlist_name") or None
+
+    try:
+        from src.connectors.youtube_api import sync_playlist
+        result = sync_playlist(
+            playlist_id=playlist_id,
+            fetch_full_metadata=fetch_full_metadata,
+            playlist_name=playlist_name,
+        )
+        lines = [
+            f"YouTube sync complete (playlist: {playlist_id})",
+            f"  Synced:  {result['synced']}",
+            f"  Skipped: {result['skipped']}",
+            f"  Errors:  {result['errors']}",
+        ]
+        return [types.TextContent(type="text", text="\n".join(lines))]
+    except FileNotFoundError as e:
+        return [types.TextContent(type="text", text=f"YouTube auth error:\n{e}")]
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"YouTube sync failed: {e}")]

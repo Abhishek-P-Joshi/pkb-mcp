@@ -23,6 +23,7 @@ class IngestPipeline:
         source: str,
         note_id: str = None,
         file_hash: str = None,
+        metadata: dict = None,
     ) -> dict:
         # 1. Skip if file unchanged
         if file_hash and storage.fts.get_by_hash(file_hash, note_id):
@@ -31,18 +32,54 @@ class IngestPipeline:
         # 2. Detect URLs
         urls = detect_urls(text)
 
-        # 3. Enrich first URL if present
+        # 3. Enrich first URL if present (skip if metadata already provided)
         title = ""
         description = ""
         channel = ""
+        channel_id = ""
         tags = ""
+        view_count = None
+        like_count = None
+        categories = ""
+        language = ""
+        thumbnail_url = ""
+        duration_seconds = None
+        duration_string = ""
+        uploaded_at = ""
         first_url = urls[0] if urls else ""
-        if first_url:
+        if metadata:
+            # Pre-fetched metadata passed in (e.g. from YouTube API connector)
+            meta = metadata
+            title = meta.get("title", "")
+            description = meta.get("description", "")
+            channel = meta.get("channel", "")
+            channel_id = meta.get("channel_id", "")
+            tags = meta.get("tags", "")
+            view_count = meta.get("view_count")
+            like_count = meta.get("like_count")
+            categories = meta.get("categories", "")
+            language = meta.get("language", "")
+            thumbnail_url = meta.get("thumbnail_url", "")
+            duration_seconds = meta.get("duration_seconds")
+            duration_string = meta.get("duration_string", "")
+            uploaded_at = meta.get("uploaded_at", "")
+            if not first_url:
+                first_url = meta.get("url", "")
+        elif first_url:
             meta = self.enricher.enrich(first_url)
             title = meta.get("title", "")
             description = meta.get("description", "")
             channel = meta.get("channel", "")
+            channel_id = meta.get("channel_id", "")
             tags = meta.get("tags", "")
+            view_count = meta.get("view_count")
+            like_count = meta.get("like_count")
+            categories = meta.get("categories", "")
+            language = meta.get("language", "")
+            thumbnail_url = meta.get("thumbnail_url", "")
+            duration_seconds = meta.get("duration_seconds")
+            duration_string = meta.get("duration_string", "")
+            uploaded_at = meta.get("uploaded_at", "")
 
         # 4. Classify content type
         content_type = classify_content(text, urls)
@@ -57,6 +94,14 @@ class IngestPipeline:
             enriched_suffix += f"\nDescription: {description}"
         if tags:
             enriched_suffix += f"\nTags: {tags}"
+        if categories:
+            enriched_suffix += f"\nCategories: {categories}"
+        if language:
+            enriched_suffix += f"\nLanguage: {language}"
+        if uploaded_at:
+            enriched_suffix += f"\nUploaded: {uploaded_at}"
+        if duration_string:
+            enriched_suffix += f"\nDuration: {duration_string}"
         text_to_embed = text + enriched_suffix
 
         # 6. Chunk
@@ -76,9 +121,19 @@ class IngestPipeline:
             "content_type": content_type,
             "title": title or text[:60],
             "url": first_url,
-            "tags": "",
+            "tags": tags,
             "file_hash": file_hash or "",
             "raw_text": text_to_embed,
+            "channel": channel,
+            "channel_id": channel_id,
+            "uploaded_at": uploaded_at,
+            "duration_seconds": duration_seconds,
+            "duration_string": duration_string,
+            "view_count": view_count,
+            "like_count": like_count,
+            "categories": categories,
+            "language": language,
+            "thumbnail_url": thumbnail_url,
         })
 
         # 9. Upsert chunks into vector store

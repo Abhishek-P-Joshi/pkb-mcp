@@ -16,10 +16,11 @@ server = Server("pkb-mcp")
 
 from src.tools.health import handle_health_check
 from src.tools.ingest import handle_ingest_content, INGEST_TOOL
-from src.tools.sync import handle_sync, SYNC_TOOL
+from src.tools.sync import handle_sync, handle_youtube_sync, SYNC_TOOL, YOUTUBE_SYNC_TOOL
 from src.tools.search import handle_search, SEARCH_TOOL
 from src.tools.list_items import handle_list, LIST_TOOL
 from src.tools.answer import handle_answer, ANSWER_TOOL
+from src.tools.browse import handle_browse, BROWSE_TOOL
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
@@ -31,9 +32,11 @@ async def list_tools() -> list[types.Tool]:
         ),
         INGEST_TOOL,
         SYNC_TOOL,
+        YOUTUBE_SYNC_TOOL,
         SEARCH_TOOL,
         LIST_TOOL,
         ANSWER_TOOL,
+        BROWSE_TOOL,
     ]
 
 @server.call_tool()
@@ -44,12 +47,16 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await handle_ingest_content(arguments)
     elif name == "sync_knowledge_base":
         return await handle_sync(arguments)
+    elif name == "sync_youtube_playlist":
+        return await handle_youtube_sync(arguments)
     elif name == "search_knowledge":
         return await handle_search(arguments)
     elif name == "list_items":
         return await handle_list(arguments)
     elif name == "answer_question":
         return await handle_answer(arguments)
+    elif name == "browse_knowledge":
+        return await handle_browse(arguments)
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -69,6 +76,9 @@ async def run():
 
     _watcher = start_watcher()
     console.print(f"  watcher:   {config.storage_path / 'watched' / 'inbox'}")
+
+    from src.scheduler import start_scheduler
+    _scheduler = start_scheduler()
 
     if config.transport == "stdio":
         # Local mode — Claude desktop spawns this process directly

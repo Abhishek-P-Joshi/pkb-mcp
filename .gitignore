@@ -6,3 +6,11 @@ data/
 config/config.local.yaml
 *.db
 .DS_Store
+# YouTube API credentials
+config/youtube_oauth_client.json
+config/youtube_token.json
+config/youtube_cookies.txt
+
+# Any other future OAuth token files
+config/*_token.json
+config/*_credentials.json
