@@ -5,6 +5,56 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from src.config import Config
 
+
+@pytest.fixture(scope="session")
+def shared_embedder():
+    """Load embedding model once per test session, not per test."""
+    from src.pipeline.embedder import Embedder
+    return Embedder()
+
+
+@pytest.fixture
+def mock_embedder():
+    """
+    Returns fake 384-dim vectors instantly.
+    Integration tests verify pipeline logic, not embedding quality.
+    Real embedding is already tested implicitly by smoke tests
+    against the live server.
+    """
+    embedder = MagicMock()
+
+    def fake_embed_texts(texts):
+        # Return deterministic fake vectors — same text = same vector
+        # This preserves dedup logic while being instant
+        return [
+            [hash(t + str(i)) % 100 / 100.0 for i in range(384)]
+            for t in texts
+        ]
+
+    def fake_embed_one(text):
+        return fake_embed_texts([text])[0]
+
+    embedder.embed_texts.side_effect = fake_embed_texts
+    embedder.embed_one.side_effect = fake_embed_one
+    return embedder
+
+
+@pytest.fixture(autouse=True, scope="session")
+def block_anthropic_api_in_tests():
+    """
+    Prevents any test from accidentally calling the Anthropic API.
+    If answer_question is called in a test without an explicit mock,
+    it will raise an error rather than silently hitting the API.
+    """
+    import anthropic
+    from unittest.mock import patch
+
+    with patch.object(anthropic.Anthropic, "__init__",
+                      side_effect=RuntimeError(
+                          "Anthropic API called in test — use a mock instead"
+                      )):
+        yield
+
 @pytest.fixture
 def temp_dir(tmp_path):
     """A temporary directory that cleans itself up."""
