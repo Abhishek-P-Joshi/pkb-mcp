@@ -231,3 +231,29 @@ class TestFTSStoreSoftDelete:
         count = temp_fts_store.purge(older_than_days=90)
         assert count == 0
         assert len(temp_fts_store.list_deleted()) == 1
+
+
+class TestFTSStoreListIdsBySource:
+
+    def test_returns_ids_for_source(self, temp_fts_store, sample_note,
+                                     sample_video_note):
+        temp_fts_store.upsert(sample_note)       # source: manual
+        temp_fts_store.upsert(sample_video_note) # source: youtube_watch_later
+        ids = temp_fts_store.list_ids_by_source("manual")
+        assert "test_note_001" in ids
+        assert "test_video_001" not in ids
+
+    def test_excludes_soft_deleted(self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        ids = temp_fts_store.list_ids_by_source("manual")
+        assert "test_note_001" not in ids
+
+    def test_returns_empty_set_for_unknown_source(self, temp_fts_store):
+        ids = temp_fts_store.list_ids_by_source("nonexistent_source")
+        assert ids == set()
+
+    def test_returns_set_not_list(self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        result = temp_fts_store.list_ids_by_source("manual")
+        assert isinstance(result, set)

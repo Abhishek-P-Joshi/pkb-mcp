@@ -163,7 +163,7 @@ def get_playlist_videos(service, playlist_id: str):
 
 
 def sync_playlist(playlist_id: str = "WL", fetch_full_metadata: bool = True,
-                  playlist_name: str = None) -> dict:
+                  playlist_name: str = None, delete_removed: bool = True) -> dict:
     """
     Sync a YouTube playlist into the knowledge base.
 
@@ -176,6 +176,28 @@ def sync_playlist(playlist_id: str = "WL", fetch_full_metadata: bool = True,
     from src.store import storage
     from src.pipeline.ingest import pipeline
 
+    source_label = f"youtube_{playlist_name}" if playlist_name else f"youtube_{playlist_id}"
+
+    # One-time migration: if a playlist_name is now provided but notes were
+    # previously stored under the ID-based source name, move them over so
+    # delta reconciliation can find them.
+    if playlist_name:
+        old_source = f"youtube_{playlist_id}"
+        old_ids = storage.fts.list_ids_by_source(old_source)
+        if old_ids:
+            import sqlite3
+            from src.config import config
+            print(f"  Migrating {len(old_ids)} notes from "
+                  f"'{old_source}' to '{source_label}'...", file=sys.stderr)
+            conn = sqlite3.connect(config.sqlite_path)
+            conn.execute(
+                "UPDATE notes SET source = ? WHERE source = ?",
+                (source_label, old_source)
+            )
+            conn.commit()
+            conn.close()
+            print("  Migration complete.", file=sys.stderr)
+
     service = get_authenticated_service()
 
     print(f"Fetching playlist '{playlist_id}'...")
@@ -183,18 +205,7 @@ def sync_playlist(playlist_id: str = "WL", fetch_full_metadata: bool = True,
     total  = len(videos)
     print(f"Found {total} videos\n")
 
-    synced = skipped = errors = removed = 0
-    source_label = f"youtube_{playlist_name}" if playlist_name else f"youtube_{playlist_id}"
-
-    # Delta removal — soft-delete notes no longer in the playlist
-    current_note_ids = {f"youtube_{playlist_id}_{v['video_id']}" for v in videos}
-    db_notes = storage.fts.list_notes(source=source_label, limit=100000)
-    for db_note in db_notes:
-        if db_note["id"] not in current_note_ids:
-            storage.fts.soft_delete(db_note["id"], deleted_from="playlist_removed")
-            storage.vector.delete_by_note_id(db_note["id"])
-            removed += 1
-            print(f"  Removed from playlist: {db_note.get('title', db_note['id'])}")
+    synced = skipped = errors = 0
 
     for i, entry in enumerate(videos, start=1):
         video_id = entry["video_id"]
@@ -245,6 +256,34 @@ def sync_playlist(playlist_id: str = "WL", fetch_full_metadata: bool = True,
         except Exception as e:
             print(f"  ({i}/{total}) ERROR for {title}: {e}", file=sys.stderr)
             errors += 1
+
+    # ── Delta reconciliation ─────────────────────────────────────
+    if delete_removed:
+        # Build set of note_ids that are currently in the playlist
+        current_note_ids = {
+            f"youtube_{playlist_id}_{v['video_id']}"
+            for v in videos
+        }
+
+        # Get all active note_ids for this source from the DB
+        existing_note_ids = storage.fts.list_ids_by_source(source_label)
+
+        # Any ID in DB but not in current playlist was removed
+        removed_ids = existing_note_ids - current_note_ids
+
+        if removed_ids:
+            print(f"  Delta: {len(removed_ids)} videos removed from playlist",
+                  file=sys.stderr)
+            for note_id in removed_ids:
+                storage.fts.soft_delete(note_id, deleted_from='playlist_removed')
+                storage.vector.delete_by_note_id(note_id)
+                print(f"  Soft deleted: {note_id}", file=sys.stderr)
+        else:
+            print("  Delta: no removals detected", file=sys.stderr)
+
+        removed = len(removed_ids)
+    else:
+        removed = 0
 
     print(f"\nDone — {synced} synced, {skipped} skipped, {removed} removed, {errors} errors")
     return {"synced": synced, "skipped": skipped, "removed": removed, "errors": errors}

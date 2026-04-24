@@ -9,7 +9,9 @@ SYNC_TOOL = types.Tool(
     name="sync_knowledge_base",
     description=(
         "Manually trigger a sync of all connected sources (inbox folder, "
-        "Obsidian vault if configured, YouTube playlist). Skips files that haven't changed."
+        "Obsidian vault if configured, YouTube playlist). Skips files that haven't changed. "
+        "Delta reconciliation automatically soft-deletes notes for videos "
+        "removed from playlists or files deleted from the Obsidian vault."
     ),
     inputSchema={
         "type": "object",
@@ -76,7 +78,7 @@ async def handle_sync(arguments: dict) -> list[types.TextContent]:
         return await handle_youtube_sync(arguments)
 
     inbox_synced = inbox_skipped = 0
-    obsidian_synced = obsidian_skipped = obsidian_errors = 0
+    obsidian_synced = obsidian_skipped = obsidian_removed = obsidian_errors = 0
     obsidian_status = "disabled"
 
     # ── Inbox ────────────────────────────────────────────────────────────────
@@ -112,9 +114,10 @@ async def handle_sync(arguments: dict) -> list[types.TextContent]:
             result = connector.sync()
             obsidian_synced = result["synced"]
             obsidian_skipped = result["skipped"]
-            obsidian_errors = len(result["errors"])
+            obsidian_removed = result.get("removed", 0)
+            obsidian_errors = result["errors"]
             obsidian_status = (
-                f"{obsidian_synced} synced, {obsidian_skipped} skipped"
+                f"{obsidian_synced} synced, {obsidian_skipped} skipped, {obsidian_removed} removed"
                 + (f", {obsidian_errors} errors" if obsidian_errors else "")
             )
         elif vault_path:
@@ -144,9 +147,10 @@ async def handle_youtube_sync(arguments: dict) -> list[types.TextContent]:
         )
         lines = [
             f"YouTube sync complete (playlist: {playlist_id})",
-            f"  Synced:  {result['synced']}",
-            f"  Skipped: {result['skipped']}",
-            f"  Errors:  {result['errors']}",
+            f"  Synced:   {result['synced']}",
+            f"  Skipped:  {result['skipped']}",
+            f"  Removed:  {result.get('removed', 0)}",
+            f"  Errors:   {result['errors']}",
         ]
         return [types.TextContent(type="text", text="\n".join(lines))]
     except FileNotFoundError as e:

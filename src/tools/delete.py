@@ -61,7 +61,10 @@ async def handle_delete(arguments: dict) -> list[types.TextContent]:
 
     # Single note delete
     if note_id:
-        note = storage.fts.get_by_id(note_id)
+        if hard:
+            note = storage.fts.get_by_id_any_status(note_id)
+        else:
+            note = storage.fts.get_by_id(note_id)
         if not note:
             return [types.TextContent(type="text",
                 text=f"Note not found: {note_id}")]

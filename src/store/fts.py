@@ -185,6 +185,19 @@ class FTSStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_ids_by_source(self, source: str) -> set:
+        """
+        Returns a set of all active note IDs for a given source.
+        Used by delta reconciliation to find removed items.
+        Fetches IDs only — no text columns — for efficiency.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM notes WHERE source = ? AND status = 'active'",
+                (source,)
+            ).fetchall()
+            return {row[0] for row in rows}
+
     def filter_by_date(
         self,
         content_type: str = None,
@@ -340,6 +353,15 @@ class FTSStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def get_by_id_any_status(self, note_id: str) -> dict | None:
+        """Fetch a note by ID regardless of active/deleted status.
+        Used by hard_delete to find notes that may be soft-deleted."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM notes WHERE id = ?", (note_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
     def soft_delete(self, note_id: str, deleted_from: str = 'user'):
         """
         Marks a note as deleted without removing it from the database.
@@ -357,16 +379,6 @@ class FTSStore:
     def hard_delete(self, note_id: str):
         """Permanently removes a note from the database."""
         with self._connect() as conn:
-            # Belt-and-suspenders: manually clean FTS5 for DBs that predate the
-            # notes_ad trigger. The trigger handles new deletes going forward.
-            row = conn.execute(
-                "SELECT rowid FROM notes WHERE id = ?", (note_id,)
-            ).fetchone()
-            if row:
-                conn.execute("""
-                    INSERT INTO notes_fts(notes_fts, rowid, id, title, raw_text, tags)
-                    VALUES ('delete', ?, ?, '', '', '')
-                """, (row[0], note_id))
             conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
 
     def restore(self, note_id: str):

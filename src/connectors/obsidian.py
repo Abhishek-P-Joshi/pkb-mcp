@@ -43,41 +43,49 @@ class ObsidianConnector:
         ]
 
     def sync(self) -> dict:
-        changed = self.get_changed_notes()
-        pipeline = IngestPipeline()
-        synced = 0
-        skipped = 0
-        removed = 0
-        errors = []
+        import sys
+        synced = skipped = errors = removed = 0
 
-        # Delta removal — soft-delete notes no longer present in the vault
-        current_note_ids = {n["note_id"] for n in self.get_all_notes()}
-        db_notes = storage.fts.list_notes(source="obsidian", limit=100000)
-        for db_note in db_notes:
-            if db_note["id"] not in current_note_ids:
-                storage.fts.soft_delete(db_note["id"], deleted_from="file_deleted")
-                storage.vector.delete_by_note_id(db_note["id"])
-                removed += 1
+        # Step 1 — get all currently existing notes in the vault
+        current_notes = self.get_all_notes()
+        current_ids = {n["note_id"] for n in current_notes}
 
-        for note in changed:
-            if note.get("error"):
-                errors.append({"note_id": note["note_id"], "error": note["error"]})
-                continue
+        # Step 2 — get all active note IDs in DB for obsidian source
+        existing_ids = storage.fts.list_ids_by_source("obsidian")
+
+        # Step 3 — soft-delete notes whose files have been deleted/moved
+        removed_ids = existing_ids - current_ids
+        for note_id in removed_ids:
+            storage.fts.soft_delete(note_id, deleted_from='file_deleted')
+            storage.vector.delete_by_note_id(note_id)
+            print(f"  Soft deleted (file removed): {note_id}", file=sys.stderr)
+            removed += 1
+
+        # Step 4 — ingest new or changed notes (existing logic)
+        changed_notes = self.get_changed_notes()
+        for note in changed_notes:
             try:
-                result = pipeline.ingest(
+                result = IngestPipeline().ingest(
                     text=note["text"],
-                    source=note["source"],
+                    source="obsidian",
                     note_id=note["note_id"],
                     file_hash=note["file_hash"],
                 )
-                if result["status"] == "skipped":
-                    skipped += 1
-                else:
+                if result["status"] == "ok":
                     synced += 1
+                else:
+                    skipped += 1
             except Exception as e:
-                errors.append({"note_id": note["note_id"], "error": str(e)})
+                print(f"  Error ingesting {note['note_id']}: {e}",
+                      file=sys.stderr)
+                errors += 1
 
-        return {"synced": synced, "skipped": skipped, "removed": removed, "errors": errors}
+        return {
+            "synced": synced,
+            "skipped": skipped,
+            "removed": removed,
+            "errors": errors,
+        }
 
 
 if __name__ == "__main__":
