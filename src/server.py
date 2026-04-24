@@ -21,6 +21,11 @@ from src.tools.search import handle_search, SEARCH_TOOL
 from src.tools.list_items import handle_list, LIST_TOOL
 from src.tools.answer import handle_answer, ANSWER_TOOL
 from src.tools.browse import handle_browse, BROWSE_TOOL
+from src.tools.delete import (
+    DELETE_TOOL, handle_delete,
+    RESTORE_TOOL, handle_restore,
+    LIST_DELETED_TOOL, handle_list_deleted,
+)
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
@@ -37,6 +42,9 @@ async def list_tools() -> list[types.Tool]:
         LIST_TOOL,
         ANSWER_TOOL,
         BROWSE_TOOL,
+        DELETE_TOOL,
+        RESTORE_TOOL,
+        LIST_DELETED_TOOL,
     ]
 
 @server.call_tool()
@@ -57,6 +65,12 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await handle_answer(arguments)
     elif name == "browse_knowledge":
         return await handle_browse(arguments)
+    elif name == "delete_item":
+        return await handle_delete(arguments)
+    elif name == "restore_item":
+        return await handle_restore(arguments)
+    elif name == "list_deleted":
+        return await handle_list_deleted(arguments)
     raise ValueError(f"Unknown tool: {name}")
 
 

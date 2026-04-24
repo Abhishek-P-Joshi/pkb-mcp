@@ -54,6 +54,11 @@ class FTSStore:
                     INSERT INTO notes_fts(rowid, id, title, raw_text, tags)
                     VALUES (new.rowid, new.id, new.title, new.raw_text, new.tags);
                 END;
+
+                CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
+                    INSERT INTO notes_fts(notes_fts, rowid, id, title, raw_text, tags)
+                    VALUES ('delete', old.rowid, old.id, old.title, old.raw_text, old.tags);
+                END;
             """)
 
             new_columns = [
@@ -67,12 +72,19 @@ class FTSStore:
                 "ALTER TABLE notes ADD COLUMN categories TEXT",
                 "ALTER TABLE notes ADD COLUMN language TEXT",
                 "ALTER TABLE notes ADD COLUMN thumbnail_url TEXT",
+                "ALTER TABLE notes ADD COLUMN status TEXT DEFAULT 'active'",
+                "ALTER TABLE notes ADD COLUMN deleted_at TIMESTAMP",
+                "ALTER TABLE notes ADD COLUMN deleted_from TEXT",
             ]
             for sql in new_columns:
                 try:
                     conn.execute(sql)
                 except sqlite3.OperationalError:
                     pass  # column already exists
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_notes_status
+                ON notes(status)
+            """)
             conn.commit()
 
     def upsert(self, note: dict):
@@ -135,6 +147,7 @@ class FTSStore:
                     SELECT n.* FROM notes n
                     JOIN notes_fts f ON n.id = f.id
                     WHERE notes_fts MATCH ? AND n.content_type = ?
+                    AND n.status = 'active'
                     ORDER BY rank LIMIT ?
                 """, (query, content_type, limit)).fetchall()
             else:
@@ -142,6 +155,7 @@ class FTSStore:
                     SELECT n.* FROM notes n
                     JOIN notes_fts f ON n.id = f.id
                     WHERE notes_fts MATCH ?
+                    AND n.status = 'active'
                     ORDER BY rank LIMIT ?
                 """, (query, limit)).fetchall()
             return [dict(r) for r in rows]
@@ -153,7 +167,7 @@ class FTSStore:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
-        conditions = ["1=1"]
+        conditions = ["1=1", "status = 'active'"]
         params = []
         if content_type:
             conditions.append("content_type = ?")
@@ -189,7 +203,7 @@ class FTSStore:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
-        conditions = ["1=1"]
+        conditions = ["1=1", "status = 'active'"]
         params = []
         if content_type:
             conditions.append("content_type = ?")
@@ -262,7 +276,7 @@ class FTSStore:
         min_duration_seconds: int = None,
         max_duration_seconds: int = None,
     ) -> int:
-        conditions = ["1=1"]
+        conditions = ["1=1", "status = 'active'"]
         params = []
         if content_type:
             conditions.append("content_type = ?")
@@ -305,7 +319,7 @@ class FTSStore:
             ).fetchone()[0]
 
     def count_notes(self, content_type: str = None, source: str = None) -> int:
-        conditions = ["1=1"]
+        conditions = ["1=1", "status = 'active'"]
         params = []
         if content_type:
             conditions.append("content_type = ?")
@@ -322,19 +336,105 @@ class FTSStore:
     def get_by_id(self, note_id: str) -> dict | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM notes WHERE id = ?", (note_id,)
+                "SELECT * FROM notes WHERE id = ? AND status = 'active'", (note_id,)
             ).fetchone()
             return dict(row) if row else None
+
+    def soft_delete(self, note_id: str, deleted_from: str = 'user'):
+        """
+        Marks a note as deleted without removing it from the database.
+        deleted_from: 'user' | 'playlist_removed' | 'file_deleted'
+        """
+        with self._connect() as conn:
+            conn.execute("""
+                UPDATE notes
+                SET status = 'deleted',
+                    deleted_at = CURRENT_TIMESTAMP,
+                    deleted_from = ?
+                WHERE id = ?
+            """, (deleted_from, note_id))
+
+    def hard_delete(self, note_id: str):
+        """Permanently removes a note from the database."""
+        with self._connect() as conn:
+            # Belt-and-suspenders: manually clean FTS5 for DBs that predate the
+            # notes_ad trigger. The trigger handles new deletes going forward.
+            row = conn.execute(
+                "SELECT rowid FROM notes WHERE id = ?", (note_id,)
+            ).fetchone()
+            if row:
+                conn.execute("""
+                    INSERT INTO notes_fts(notes_fts, rowid, id, title, raw_text, tags)
+                    VALUES ('delete', ?, ?, '', '', '')
+                """, (row[0], note_id))
+            conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+
+    def restore(self, note_id: str):
+        """Reverses a soft delete, making the note active again."""
+        with self._connect() as conn:
+            conn.execute("""
+                UPDATE notes
+                SET status = 'active',
+                    deleted_at = NULL,
+                    deleted_from = NULL
+                WHERE id = ?
+            """, (note_id,))
+
+    def list_deleted(
+        self,
+        content_type: str = None,
+        source: str = None,
+        deleted_after: str = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Lists soft-deleted notes for review or restoration."""
+        query = """
+            SELECT id, title, content_type, source, url,
+                   deleted_at, deleted_from, channel
+            FROM notes
+            WHERE status = 'deleted'
+        """
+        params = []
+        if content_type:
+            query += " AND content_type = ?"
+            params.append(content_type)
+        if source:
+            query += " AND source = ?"
+            params.append(source)
+        if deleted_after:
+            query += " AND deleted_at >= ?"
+            params.append(deleted_after)
+        query += " ORDER BY deleted_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def purge(self, older_than_days: int = 90) -> int:
+        """
+        Hard-deletes notes that have been soft-deleted for longer
+        than older_than_days. Returns the number of rows purged.
+        Run this periodically to keep the database from growing.
+        """
+        with self._connect() as conn:
+            result = conn.execute("""
+                DELETE FROM notes
+                WHERE status = 'deleted'
+                AND deleted_at < datetime('now', ? || ' days')
+            """, (f"-{older_than_days}",))
+            return result.rowcount
 
     def get_by_hash(self, file_hash: str, note_id: str = None) -> dict | None:
         with self._connect() as conn:
             if note_id is not None:
                 row = conn.execute(
-                    "SELECT * FROM notes WHERE file_hash = ? AND id = ?",
+                    "SELECT * FROM notes WHERE file_hash = ? AND id = ? AND status = 'active'",
                     (file_hash, note_id),
                 ).fetchone()
             else:
                 row = conn.execute(
-                    "SELECT * FROM notes WHERE file_hash = ?", (file_hash,)
+                    "SELECT * FROM notes WHERE file_hash = ? AND status = 'active'",
+                    (file_hash,),
                 ).fetchone()
             return dict(row) if row else None

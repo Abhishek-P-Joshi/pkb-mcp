@@ -47,7 +47,17 @@ class ObsidianConnector:
         pipeline = IngestPipeline()
         synced = 0
         skipped = 0
+        removed = 0
         errors = []
+
+        # Delta removal — soft-delete notes no longer present in the vault
+        current_note_ids = {n["note_id"] for n in self.get_all_notes()}
+        db_notes = storage.fts.list_notes(source="obsidian", limit=100000)
+        for db_note in db_notes:
+            if db_note["id"] not in current_note_ids:
+                storage.fts.soft_delete(db_note["id"], deleted_from="file_deleted")
+                storage.vector.delete_by_note_id(db_note["id"])
+                removed += 1
 
         for note in changed:
             if note.get("error"):
@@ -67,7 +77,7 @@ class ObsidianConnector:
             except Exception as e:
                 errors.append({"note_id": note["note_id"], "error": str(e)})
 
-        return {"synced": synced, "skipped": skipped, "errors": errors}
+        return {"synced": synced, "skipped": skipped, "removed": removed, "errors": errors}
 
 
 if __name__ == "__main__":

@@ -183,7 +183,18 @@ def sync_playlist(playlist_id: str = "WL", fetch_full_metadata: bool = True,
     total  = len(videos)
     print(f"Found {total} videos\n")
 
-    synced = skipped = errors = 0
+    synced = skipped = errors = removed = 0
+    source_label = f"youtube_{playlist_name}" if playlist_name else f"youtube_{playlist_id}"
+
+    # Delta removal — soft-delete notes no longer in the playlist
+    current_note_ids = {f"youtube_{playlist_id}_{v['video_id']}" for v in videos}
+    db_notes = storage.fts.list_notes(source=source_label, limit=100000)
+    for db_note in db_notes:
+        if db_note["id"] not in current_note_ids:
+            storage.fts.soft_delete(db_note["id"], deleted_from="playlist_removed")
+            storage.vector.delete_by_note_id(db_note["id"])
+            removed += 1
+            print(f"  Removed from playlist: {db_note.get('title', db_note['id'])}")
 
     for i, entry in enumerate(videos, start=1):
         video_id = entry["video_id"]
@@ -219,10 +230,9 @@ def sync_playlist(playlist_id: str = "WL", fetch_full_metadata: bool = True,
             if meta.get("duration_string"):
                 text += f"\nDuration: {meta['duration_string']}"
 
-            source = f"youtube_{playlist_name}" if playlist_name else f"youtube_{playlist_id}"
             pipeline.ingest(
                 text=text,
-                source=source,
+                source=source_label,
                 note_id=note_id,
                 metadata=meta,
             )
@@ -236,5 +246,5 @@ def sync_playlist(playlist_id: str = "WL", fetch_full_metadata: bool = True,
             print(f"  ({i}/{total}) ERROR for {title}: {e}", file=sys.stderr)
             errors += 1
 
-    print(f"\nDone — {synced} synced, {skipped} skipped, {errors} errors")
-    return {"synced": synced, "skipped": skipped, "errors": errors}
+    print(f"\nDone — {synced} synced, {skipped} skipped, {removed} removed, {errors} errors")
+    return {"synced": synced, "skipped": skipped, "removed": removed, "errors": errors}

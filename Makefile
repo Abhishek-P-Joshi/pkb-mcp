@@ -8,6 +8,8 @@ help:
 	@echo "make test-smoke       — run smoke tests (live db)"
 	@echo "make test-all         — run all tests"
 	@echo "make test-coverage    — unit + integration with coverage report"
+	@echo "make purge-deleted    — hard-delete soft-deleted notes older than 90 days"
+	@echo "make purge-deleted-30 — hard-delete soft-deleted notes older than 30 days"
 	@echo "make health           — quick health check via Python"
 	@echo "make clean            — remove __pycache__ and .pyc files"
 
@@ -34,6 +36,22 @@ test-coverage:
 	python3 -m pytest tests/unit/ tests/integration/ \
 	  --cov=src --cov-report=term-missing --cov-report=html \
 	  --tb=short
+
+purge-deleted:
+	@echo "Purging soft-deleted notes older than 90 days..."
+	@python3 -c "\
+from src.store.fts import FTSStore; \
+store = FTSStore(); \
+count = store.purge(older_than_days=90); \
+print(f'Purged {count} permanently deleted notes.')"
+
+purge-deleted-30:
+	@echo "Purging soft-deleted notes older than 30 days..."
+	@python3 -c "\
+from src.store.fts import FTSStore; \
+store = FTSStore(); \
+count = store.purge(older_than_days=30); \
+print(f'Purged {count} permanently deleted notes.')"
 
 health:
 	python3 -c "from src.store import storage; print('SQLite OK:', storage.fts.db_path); print('ChromaDB OK:', storage.vector.collection.name)"

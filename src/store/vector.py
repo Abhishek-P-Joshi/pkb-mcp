@@ -67,3 +67,20 @@ class VectorStore:
                 "score": round(1 - results["distances"][0][i], 3),
             })
         return hits
+
+    def delete_by_note_id(self, note_id: str):
+        """
+        Removes all chunks belonging to a note from ChromaDB.
+        Called alongside FTSStore.hard_delete() for full removal.
+        For soft deletes this is NOT called — chunks stay in ChromaDB
+        but are never returned because the SQLite row is filtered out
+        at the application layer.
+        """
+        try:
+            self._get_collection().delete(
+                where={"note_id": {"$eq": note_id}}
+            )
+        except Exception as e:
+            import sys
+            print(f"[vector] Could not delete chunks for {note_id}: {e}",
+                  file=sys.stderr)

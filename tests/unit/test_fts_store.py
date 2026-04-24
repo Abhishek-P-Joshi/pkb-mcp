@@ -38,6 +38,18 @@ class TestFTSStoreUpsertAndRetrieve:
         result = temp_fts_store.get_by_hash("abc123")
         assert result is not None
 
+    def test_restore_allows_reingestion(self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+
+        # After restore, get_by_id should work again
+        temp_fts_store.restore("test_note_001")
+        note = temp_fts_store.get_by_id("test_note_001")
+        assert note is not None
+        assert note["status"] == "active"
+        assert note["deleted_at"] is None
+        assert note["raw_text"] is not None  # raw_text preserved through delete/restore
+
 
 class TestFTSStoreSearch:
 
@@ -131,3 +143,91 @@ class TestFTSStoreListAndFilter:
         assert len(page1) == 1
         assert len(page2) == 1
         assert page1[0]["id"] != page2[0]["id"]
+
+
+class TestFTSStoreSoftDelete:
+
+    def test_soft_delete_hides_note_from_search(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        results = temp_fts_store.search("astrophysics")
+        ids = [r["id"] for r in results]
+        assert "test_note_001" not in ids
+
+    def test_soft_delete_hides_note_from_list(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        results = temp_fts_store.list_notes()
+        ids = [r["id"] for r in results]
+        assert "test_note_001" not in ids
+
+    def test_soft_delete_hides_from_get_by_id(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        assert temp_fts_store.get_by_id("test_note_001") is None
+
+    def test_soft_delete_hides_from_get_by_hash(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        result = temp_fts_store.get_by_hash("abc123", "test_note_001")
+        assert result is None
+
+    def test_soft_deleted_note_appears_in_list_deleted(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001", "user")
+        deleted = temp_fts_store.list_deleted()
+        ids = [r["id"] for r in deleted]
+        assert "test_note_001" in ids
+
+    def test_restore_makes_note_active_again(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        assert temp_fts_store.get_by_id("test_note_001") is None
+        temp_fts_store.restore("test_note_001")
+        assert temp_fts_store.get_by_id("test_note_001") is not None
+
+    def test_hard_delete_removes_note_permanently(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.hard_delete("test_note_001")
+        assert temp_fts_store.get_by_id("test_note_001") is None
+        assert temp_fts_store.list_deleted() == []
+
+    def test_soft_delete_allows_reingestion_of_same_file(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        # Hash check should return None since note is soft deleted
+        # allowing the same file to be re-ingested
+        result = temp_fts_store.get_by_hash("abc123", "test_note_001")
+        assert result is None
+
+    def test_purge_removes_old_soft_deleted_notes(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        import sqlite3
+        conn = sqlite3.connect(temp_fts_store.db_path)
+        conn.execute("""
+            UPDATE notes SET deleted_at = datetime('now', '-91 days')
+            WHERE id = 'test_note_001'
+        """)
+        conn.commit()
+        conn.close()
+        count = temp_fts_store.purge(older_than_days=90)
+        assert count == 1
+        assert temp_fts_store.list_deleted() == []
+
+    def test_purge_keeps_recently_deleted_notes(
+            self, temp_fts_store, sample_note):
+        temp_fts_store.upsert(sample_note)
+        temp_fts_store.soft_delete("test_note_001")
+        count = temp_fts_store.purge(older_than_days=90)
+        assert count == 0
+        assert len(temp_fts_store.list_deleted()) == 1
