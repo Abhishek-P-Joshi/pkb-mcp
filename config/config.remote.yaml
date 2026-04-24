@@ -1,0 +1,9 @@
+env: remote
+
+transport: http
+host: 0.0.0.0
+port: 8000
+auth_enabled: true
+storage_path: /var/pkb/data
+embedding_model: all-MiniLM-L6-v2
+sync_interval_minutes: 30
